@@ -1,67 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
-import { GetServerSideProps } from 'next';
-import { GraphQLClient, gql } from 'graphql-request';
-
-export const getServerSideProps: GetServerSideProps = async (ctx) => {
-	const endpoint = process.env.GRAPHQL_ENDPOINT as string;
-	const graphQLClient = new GraphQLClient(endpoint);
-	const referringURL = ctx.req.headers?.referer || null;
-	const pathArr = ctx.query.postpath as Array<string>;
-	const path = pathArr.join('/');
-	console.log(path);
-	const fbclid = ctx.query.fbclid;
-
-	// redirect if facebook is the referer or request contains fbclid
-	if (referringURL?.includes('facebook.com') || fbclid) {
-		return {
-			redirect: {
-				permanent: false,
-				destination: `${
-					endpoint.replace(/(\/graphql\/)/, '/') + encodeURI(path as string)
-				}`,
-			},
-		};
-	}
-	const query = gql`
-		{
-			post(id: "/${path}/", idType: URI) {
-				id
-				excerpt
-				title
-				link
-				dateGmt
-				modifiedGmt
-				content
-				author {
-					node {
-						name
-					}
-				}
-				featuredImage {
-					node {
-						sourceUrl
-						altText
-					}
-				}
-			}
-		}
-	`;
-
-	const data = await graphQLClient.request(query);
-	if (!data.post) {
-		return {
-			notFound: true,
-		};
-	}
-	return {
-		props: {
-			path,
-			post: data.post,
-			host: ctx.req.headers.host,
-		},
-	};
-};
+import { gql, GraphQLClient } from 'graphql-request';
 
 interface PostProps {
 	post: any;
@@ -71,8 +10,45 @@ interface PostProps {
 
 const Post: React.FC<PostProps> = (props) => {
 	const { post, host, path } = props;
+	const [postContent, setPostContent] = useState(null);
 
-	// to remove tags from excerpt
+	useEffect(() => {
+		const endpoint = process.env.GRAPHQL_ENDPOINT as string;
+		const graphQLClient = new GraphQLClient(endpoint);
+		const query = gql`
+			{
+				post(id: "/${path}/", idType: URI) {
+					id
+					excerpt
+					title
+					link
+					dateGmt
+					modifiedGmt
+					content
+					author {
+						node {
+							name
+						}
+					}
+					featuredImage {
+						node {
+							sourceUrl
+							altText
+						}
+					}
+				}
+			}
+		`;
+		graphQLClient
+			.request(query)
+				.then((data) => {
+					setPostContent(data.post.content);
+				})
+				.catch((err) => {
+					console.error(err);
+				});
+	}, [path]);
+
 	const removeTags = (str: string) => {
 		if (str === null || str === '') return '';
 		else str = str.toString();
@@ -104,10 +80,72 @@ const Post: React.FC<PostProps> = (props) => {
 					src={post.featuredImage.node.sourceUrl}
 					alt={post.featuredImage.node.altText || post.title}
 				/>
-				<article dangerouslySetInnerHTML={{ __html: post.content }} />
+				{postContent && (
+					<article dangerouslySetInnerHTML={{ __html: postContent }} />
+				)}
 			</div>
 		</>
 	);
+};
+
+export const getServerSideProps = async (ctx) => {
+	const endpoint = process.env.GRAPHQL_ENDPOINT as string;
+	const graphQLClient = new GraphQLClient(endpoint);
+	const referringURL = ctx.req.headers?.referer || null;
+	const pathArr = ctx.query.postpath as Array<string>;
+	const path = pathArr.join('/');
+	console.log(path);
+	const fbclid = ctx.query.fbclid;
+
+	// redirect if facebook is the referer or request contains fbclid
+	if (referringURL?.includes('facebook.com') || fbclid) {
+		return {
+			redirect: {
+				permanent: false,
+			destination: `${
+				endpoint.replace(/(\/graphql\/)/, '/') + encodeURI(path as string)
+			}`,
+		},
+	};
+}
+const query = gql`
+	{
+		post(id: "/${path}/", idType: URI) {
+			id
+			excerpt
+			title
+			link
+			dateGmt
+			modifiedGmt
+			content
+			author {
+				node {
+					name
+				}
+			}
+			featuredImage {
+				node {
+					sourceUrl
+					altText
+				}
+			}
+		}
+	}
+`;
+
+const data = await graphQLClient.request(query);
+if (!data.post) {
+	return {
+		notFound: true,
+	};
+}
+return {
+	props: {
+		path,
+		post: data.post,
+		host: ctx.req.headers.host,
+	},
+};
 };
 
 export default Post;
